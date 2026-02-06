@@ -55,3 +55,46 @@ def image_to_z(image, original_bit_length=None):
     z_bits = z_bits[:original_bit_length]
   
   return z_bits
+
+def decide_msb_bits(secret size,block capacity):
+  """
+  secret size :機密資訊位元數
+  block capacity : 每個block的最大容量
+  """
+  num block = math.ceil(secret size/block capacity)
+
+  """
+  判斷式
+  """
+  if secret size < block capacity *1:
+    return [7]
+  elif secret_size < block_capacity * 2:
+    return [6, 7]  # 使用兩個 MSB
+  elif secret_size < block_capacity * 3:
+    return [5, 6, 7]  # 使用三個 MSB
+  elif secret_size < block_capacity * 4:
+    return [4, 5, 6, 7]  # 使用四個 MSB
+  elif secret_size < block_capacity * 5:
+    return [3, 4, 5, 6, 7] # 使用五個 MSB
+  elif secret_size < block_capacity * 6:
+    return [2, 3, 4, 5, 6, 7] # 使用六個 MSB
+  elif secret_size < block_capacity * 7:
+    return [1, 2, 3, 4, 5, 6, 7] # 使用七個 MSB
+  else:
+    return [0, 1, 2, 3, 4, 5, 6, 7] # 使用八個 MSB
+
+def decide_msb_bits_dyanamic(secret_size, cover_image_shape):
+  height, width = cover_image_shape
+  num_pixels = height * width
+
+  max_capacity = num_pixels *8
+  if secret_size > max_capacity:
+    rasie ValueError("Secret data too big! over the size.)
+
+  avg_bits_needed = math ceil(secret_size/(height*width))
+
+  num_msb = min(max(avg_bits_needed, 1),8)
+
+  msb_bits = list(range(8 - num_msb,8))
+
+  return msb_bits, avg_bits_needed
