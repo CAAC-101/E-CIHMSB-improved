@@ -52,78 +52,54 @@ def embed_secret(cover_image, secret, secret_type='text', contact_key=None):
         raise ValueError(f"圖片大小必須是 8 的倍數！當前大小: {width}×{height}")
     
     # ========== 步驟 2：計算容量並檢查 ==========
-    # 2.1 計算 8×8 區塊數量
-    num_rows = height // BLOCK_SIZE
-    num_cols = width // BLOCK_SIZE
-    num_units = num_rows * num_cols
-    
-    # 2.2 計算容量
-    capacity = num_units * TOTAL_AVERAGES_PER_UNIT
-    
-    # 2.3 將機密內容轉成二進位（加入類型標記）
+   # 1. 計算機密內容總位元數
     if secret_type == 'text':
-        type_marker = [0]  # 0 = 文字
+        type_marker = [0]
         content_bits = text_to_binary(secret)
-        info = {'type': 'text', 'length': len(secret), 'bits': len(content_bits) + 1}
     else:
-        type_marker = [1]  # 1 = 圖片
-        content_bits, orig_size, mode = image_to_binary(secret, capacity - 1)  # 預留 1 bit 給類型標記
-        info = {'type': 'image', 'size': orig_size, 'mode': mode, 'bits': len(content_bits) + 1}
+        type_marker = [1]
+        # 注意：此處需先暫定最大容量來轉換圖片，或預先計算圖片二進位長度
+        content_bits, orig_size, mode = image_to_binary(secret, (num_units * 21 * 7) - 1)
     
-    # 2.4 組合完整的 secret_bits
     secret_bits = type_marker + content_bits
+    total_needed = len(secret_bits)
     
-    # 2.5 檢查容量是否足夠
-    if len(secret_bits) > capacity:
-        raise ValueError(
-            f"機密內容太大！需要 {len(secret_bits)} bits，但容量只有 {capacity} bits"
-        )
+    # 2. 決定每個平均值需要嵌入幾個位元 (bpa: bits per average)
+    # 每個 8x8 區塊有 21 個平均值
+    total_averages = num_units * TOTAL_AVERAGES_PER_UNIT
+    bpa = (total_needed + total_averages - 1) // total_averages # 無條件進位
     
-    # ========== 步驟 3：對每個 8×8 區塊進行嵌入 ==========
+    if bpa > 7:
+        raise ValueError(f"機密內容太大！即使每個像素嵌入 7 bits 仍不足。請更換更大的圖片。")
+    if bpa < 1: bpa = 1
+    
+    print(f"動態容量調整：每個平均值將嵌入 {bpa} 個位元")
+
+    # 3. 嵌入過程
     z_bits = []
     secret_bit_index = 0
-    finished = False
     
     for i in range(num_rows):
-        if finished:
-            break
-        
         for j in range(num_cols):
-            # 檢查是否所有 secret_bits 已處理完
-            if secret_bit_index >= len(secret_bits):
-                finished = True
-                break
+            # ... (提取 block, 生成 Q, 計算 averages_21, 排列 reordered_averages) ...
             
-            # 3.1 提取這個 8×8 區塊
-            start_row = i * BLOCK_SIZE
-            end_row = start_row + BLOCK_SIZE
-            start_col = j * BLOCK_SIZE
-            end_col = start_col + BLOCK_SIZE
-            block = cover_image[start_row:end_row, start_col:end_col]
-            
-            # 3.2 生成這個區塊專屬的排列密鑰 Q（加入 contact_key）
-            Q = generate_Q_from_block(block, Q_LENGTH, contact_key=contact_key)
-            
-            # 3.3 計算 21 個多層次平均值
-            averages_21 = calculate_hierarchical_averages(block)
-            
-            # 3.4 用 Q 重新排列 21 個平均值
-            reordered_averages = apply_Q_three_rounds(averages_21, Q)
-            
-            # 3.5 提取排列後的 21 個 MSB
-            msbs = get_msbs(reordered_averages)
-            
-            # 3.6 映射產生 Z 碼
-            for k in range(TOTAL_AVERAGES_PER_UNIT):
-                if secret_bit_index >= len(secret_bits):
-                    finished = True
-                    break
-                
-                secret_bit = secret_bits[secret_bit_index]
-                msb = msbs[k]
-                z_bit = map_to_z(secret_bit, msb)
-                z_bits.append(z_bit)
-                
-                secret_bit_index += 1
+            # 遍歷該區塊的 21 個平均值
+            for avg_val in reordered_averages:
+                # 根據計算出的 bpa，從該平均值提取對應數量的位元
+                # 例如 bpa=2，則取 MSB(第1位) 和 第2位
+                for bit_pos in range(bpa):
+                    if secret_bit_index < len(secret_bits):
+                        m_bit = secret_bits[secret_bit_index]
+                        
+                        # 提取平均值的第 (bit_pos + 1) 個位元 (從 MSB 開始算)
+                        # 例如 bit_pos=0 是 MSB (128), bit_pos=1 是 64...
+                        shift = 7 - bit_pos
+                        current_avg_bit = (avg_val >> shift) & 1
+                        
+                        # 使用現有的映射函數
+                        z_bit = map_to_z(m_bit, current_avg_bit)
+                        z_bits.append(z_bit)
+                        secret_bit_index += 1
     
-    return z_bits, capacity, info
+    # 注意：接收方也需要知道 bpa 才能解碼，建議將 bpa 資訊放入 header 或約定好
+    return z_bits, total_averages * bpa, info
